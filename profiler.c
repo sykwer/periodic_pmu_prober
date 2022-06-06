@@ -70,50 +70,64 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  uint32_t leader_event_type;
-  uint64_t leader_event_config;
+  uint32_t leader_event_type, l1miss_event_type, lfbhit_event_type;
+  uint64_t leader_event_config, l1miss_event_config, lfbhit_event_config;
+  struct perf_event_attr leader_attr, l1miss_attr, lfbhit_attr;
+
   encode_event_string("l1d_pend_miss.pending", &leader_event_type, &leader_event_config);
-  struct perf_event_attr leader_attr;
+  encode_event_string("mem_load_retired.l1_miss", &l1miss_event_type, &l1miss_event_config);
+  encode_event_string("mem_load_retired.fb_hit", &lfbhit_event_type, &lfbhit_event_config);
+
   setup_perf_event_attr_grouped(&leader_attr, leader_event_type, leader_event_config);
+  setup_perf_event_attr_grouped(&l1miss_attr, l1miss_event_type, l1miss_event_config);
+  setup_perf_event_attr_grouped(&lfbhit_attr, lfbhit_event_type, lfbhit_event_config);
 
   // tmp
   target_pid = getpid();
   // tmp
 
   int leader_fd = syscall(__NR_perf_event_open, &leader_attr, target_pid, -1/*cpu*/ , -1/*group_fd*/ , 0/*flag*/);
-  if (leader_fd == -1) {
+  int l1miss_fd = syscall(__NR_perf_event_open, &l1miss_attr, target_pid, -1/*cpu*/ , leader_fd, 0/*flag*/);
+  int lfbhit_fd = syscall(__NR_perf_event_open, &lfbhit_attr, target_pid, -1/*cpu*/ , leader_fd, 0/*flag*/);
+  if (leader_fd == -1 || l1miss_fd == -1 || lfbhit_fd == -1) {
   	perror("perf_event_open error");
   	exit(EXIT_FAILURE);
   }
 
-  uint64_t leader_id;
+  uint64_t leader_id, l1miss_id, lfbhit_id;
   ioctl(leader_fd, PERF_EVENT_IOC_ID, &leader_id);
+  ioctl(l1miss_fd, PERF_EVENT_IOC_ID, &l1miss_id);
+  ioctl(lfbhit_fd, PERF_EVENT_IOC_ID, &lfbhit_id);
 
   ioctl(leader_fd, PERF_EVENT_IOC_RESET, PERF_IOC_FLAG_GROUP);
   ioctl(leader_fd, PERF_EVENT_IOC_ENABLE, PERF_IOC_FLAG_GROUP);
 
-  // measurement duratoin
+  // measurement duration
   sleep(measurement_time_sec);
-  volatile char hoge[100];
-  for (int i = 0; i < 100; i++) hoge[i];
+  // tmp
+  volatile char hoge[100000];
+  for (int i = 0; i < 100000; i++) hoge[i];
+  // tmp
 
   ioctl(leader_fd, PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP);
 
-  uint64_t l1_pending_cycles;
   struct read_format *rf = (struct read_format*) buffer;
   size_t sz = read(leader_fd, buffer, sizeof(buffer));
   if (sz == -1) {
     perror("read error");
     exit(EXIT_FAILURE);
   }
-  printf("The size of read data = %ldbyte\n", sz);
+
+  uint64_t l1_pending_cycles, l1miss_num, lfbhit_num;
 
   for (int i = 0; i < rf->nr; i++) {
     if (rf->values[i].id == leader_id) l1_pending_cycles = rf->values[i].value;
+    else if (rf->values[i].id == l1miss_id) l1miss_num = rf->values[i].value;
+    else if (rf->values[i].id == lfbhit_id) lfbhit_num = rf->values[i].value;
     else printf("hoge\n");
   }
 
-  printf("l1_pending_cycles=%ld\n", l1_pending_cycles);
+  printf("l1_pending_cycles=%ld\nl1miss_num=%ld\nlfbhit_num=%ld\n", l1_pending_cycles, l1miss_num, lfbhit_num);
 
   return 0;
 }
