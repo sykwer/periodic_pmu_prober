@@ -82,10 +82,6 @@ int main(int argc, char **argv) {
   setup_perf_event_attr_grouped(&l1miss_attr, l1miss_event_type, l1miss_event_config);
   setup_perf_event_attr_grouped(&lfbhit_attr, lfbhit_event_type, lfbhit_event_config);
 
-  // tmp
-  target_pid = getpid();
-  // tmp
-
   int leader_fd = syscall(__NR_perf_event_open, &leader_attr, target_pid, -1/*cpu*/ , -1/*group_fd*/ , 0/*flag*/);
   int l1miss_fd = syscall(__NR_perf_event_open, &l1miss_attr, target_pid, -1/*cpu*/ , leader_fd, 0/*flag*/);
   int lfbhit_fd = syscall(__NR_perf_event_open, &lfbhit_attr, target_pid, -1/*cpu*/ , leader_fd, 0/*flag*/);
@@ -104,10 +100,6 @@ int main(int argc, char **argv) {
 
   // measurement duration
   sleep(measurement_time_sec);
-  // tmp
-  volatile char hoge[100000];
-  for (int i = 0; i < 100000; i++) hoge[i];
-  // tmp
 
   ioctl(leader_fd, PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP);
 
