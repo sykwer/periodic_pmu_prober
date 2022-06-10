@@ -4,6 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+char buffer[1000];
+unsigned int measurement_time_sec;
+pid_t target_pid;
+
 struct read_format {
   uint64_t nr;            /* The number of events */
   uint64_t  time_enabled;  /* if PERF_FORMAT_TOTAL_TIME_ENABLED */
@@ -50,19 +54,25 @@ static void setup_perf_event_attr_grouped(struct perf_event_attr *attr, uint32_t
                       PERF_FORMAT_ID | PERF_FORMAT_GROUP;
 }
 
-char buffer[1000];
+
+void parse_arg_options(int argc, char **argv) {
+  int opt;
+  while (opt = getopt(argc, argv, "p:t:") != -1) {
+    switch (opt) {
+      case 't':
+        measurement_time_sec = atoi(optarg);
+        break;
+      case 'p':
+        target_pid = atoi(optarg);
+        break;
+      default:
+        break;
+    }
+  }
+}
 
 int main(int argc, char **argv) {
-  if (argc != 3) {
-    fprintf(stdout, "invalid argument\n");
-    exit(EXIT_FAILURE);
-  }
-
-  pid_t target_pid;
-  sscanf(argv[1], "%d", &target_pid);
-
-  unsigned int measurement_time_sec;
-  sscanf(argv[2], "%u", &measurement_time_sec);
+  parse_arg_options(argc, argv);
 
   // Prepare event tables for the underlining hardware and software platform
   if (pfm_initialize() != PFM_SUCCESS) {
