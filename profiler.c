@@ -3,6 +3,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <sys/time.h>
+#include <time.h>
+
+#define MONITORED_EVENTS_NUM 3
+#define MONITORED_PERIOD_MS 10
 
 struct read_format {
   uint64_t nr;            /* The number of events */
@@ -25,7 +31,11 @@ struct event_info {
   uint64_t measured_value;
 };
 
-#define MONITORED_EVENTS_NUM 3
+struct measurement_period_log {
+  uint64_t values[MONITORED_EVENTS_NUM];
+  unsigned long start_timestamp;
+  unsigned long end_timestamp;
+};
 
 const char *monitored_event_strings[MONITORED_EVENTS_NUM] = {
   "l1d_pend_miss.pending",
@@ -120,6 +130,67 @@ static int prepare_event_infos() {
   return leader_fd;
 }
 
+static void measurement_loop(int leader_fd) {
+  int loop_num = measurement_time_sec * 1000 / MONITORED_PERIOD_MS;
+  struct measurement_period_log logs[loop_num];
+  unsigned long prior_timestamp;
+  struct timeval tv;
+
+  mlockall(MCL_CURRENT);
+
+  ioctl(leader_fd, PERF_EVENT_IOC_RESET, PERF_IOC_FLAG_GROUP);
+  ioctl(leader_fd, PERF_EVENT_IOC_ENABLE, PERF_IOC_FLAG_GROUP);
+  gettimeofday(&tv, NULL);
+  prior_timestamp = tv.tv_sec * 1000 * 1000 + tv.tv_usec;
+
+  for (int loop = 0; loop < loop_num; loop++) {
+    usleep(MONITORED_PERIOD_MS * 1000);
+    gettimeofday(&tv, NULL);
+
+    ioctl(leader_fd, PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP);
+    struct read_format *rf = (struct read_format*) buffer;
+    size_t sz = read(leader_fd, buffer, sizeof(buffer));
+
+    if (sz == -1) {
+      perror("read error");
+      exit(EXIT_FAILURE);
+    }
+
+    ioctl(leader_fd, PERF_EVENT_IOC_RESET, PERF_IOC_FLAG_GROUP);
+    ioctl(leader_fd, PERF_EVENT_IOC_ENABLE, PERF_IOC_FLAG_GROUP);
+
+    for (int i = 0; i < rf->nr; i++) {
+      for (int j = 0; j < MONITORED_EVENTS_NUM; j++) {
+        if (rf->values[i].id == event_infos[j].id) {
+          logs[loop].values[j] = rf->values[i].value;
+        }
+      }
+    }
+
+    logs[loop].start_timestamp = prior_timestamp;
+    logs[loop].end_timestamp = tv.tv_sec * 1000 * 1000 + tv.tv_usec;
+    prior_timestamp = tv.tv_sec * 1000 * 1000 + tv.tv_usec;
+  }
+
+  ioctl(leader_fd, PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP);
+
+  FILE *f = fopen("measurement.log", "a+");
+  if (f == NULL) {
+    perror("fopen error");
+    exit(EXIT_FAILURE);
+  }
+
+  for (int loop = 0; loop < loop_num; loop++) {
+    for (int j = 0; j < MONITORED_EVENTS_NUM; j++) {
+      fprintf(f, "%ld ", logs[loop].values[j]);
+    }
+
+    fprintf(f, "%ld %ld\n", logs[loop].start_timestamp, logs[loop].end_timestamp);
+  }
+
+  fclose(f);
+}
+
 int main(int argc, char **argv) {
   parse_arg_options(argc, argv);
 
@@ -130,31 +201,11 @@ int main(int argc, char **argv) {
   }
 
   int leader_fd = prepare_event_infos();
-  printf("leader_fd = %d\n", leader_fd);
 
-  ioctl(leader_fd, PERF_EVENT_IOC_RESET, PERF_IOC_FLAG_GROUP);
-  ioctl(leader_fd, PERF_EVENT_IOC_ENABLE, PERF_IOC_FLAG_GROUP);
-
-  // measurement duration
-  sleep(measurement_time_sec);
-
-  ioctl(leader_fd, PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP);
-
-  struct read_format *rf = (struct read_format*) buffer;
-  size_t sz = read(leader_fd, buffer, sizeof(buffer));
-  if (sz == -1) {
-    perror("read error");
-    exit(EXIT_FAILURE);
-  }
-
-  for (int i = 0; i < rf->nr; i++) {
-    for (int j = 0; j < MONITORED_EVENTS_NUM; j++) {
-      if (rf->values[i].id == event_infos[j].id) event_infos[j].measured_value = rf->values[i].value;
-    }
-  }
+  measurement_loop(leader_fd);
 
   for (int i = 0; i < MONITORED_EVENTS_NUM; i++) {
-    printf("%s : %ld\n", event_infos[i].event_string, event_infos[i].measured_value);
+    close(event_infos[i].fd);
   }
 
   return 0;
