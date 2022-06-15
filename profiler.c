@@ -7,7 +7,7 @@
 #include <sys/time.h>
 #include <time.h>
 
-#define MONITORED_EVENTS_NUM 3
+#define MONITORED_EVENTS_NUM 4
 #define MONITORED_PERIOD_MS 10
 
 struct read_format {
@@ -41,6 +41,7 @@ const char *monitored_event_strings[MONITORED_EVENTS_NUM] = {
   "l1d_pend_miss.pending",
   "mem_load_retired.l1_miss",
   "mem_load_retired.fb_hit",
+  "mem_load_retired.l3_miss",
 };
 
 struct event_info event_infos[MONITORED_EVENTS_NUM] = {{0}};
